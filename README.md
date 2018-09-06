@@ -13,33 +13,63 @@ Potter
 - [License](#license)
 
 ## Installation
-- Go 1.9
-- Dep (for development) [Vendoring tool](https://github.com/golang/dep#usage)
+- Go 1.11+
+- Go modules (for development)
 
 ## Dependencies
 
-see [Gopkg.lock](./Gopkg.lock)
+see [go.mod](./go.mod)
 
 ## Configuration
 
-see [config.yml](./config.example.yml)
+see [config.yml](./config.yml)
 
 Example:
 ```yaml
-# Uncomment if needed:
-#proxy: http://proxy.url
-api:
-  - method: GET
-    url: /fake-example
-    fixture: fixture.example.json
-  - method: POST
-    url: /fake-example
-    fixture: fixture.example.json
-  - method: HEAD
-    url: /fake-example
-    fixture: fixture.example.json
+pprof:
+  address: :6060
 
+metrics:
+  address: :8090
+
+log:
+  level: debug
+  format: console
+
+api:
+  debug: true
+  address: :8080
+  shutdown_timeout: 10s
+
+fixtures:
+  # good example
+  - method: GET
+    url: /fake-json-example
+    fixture: fixture.example.json
+  # good example
+  - method: POST
+    url: /fake-echo-example
+    echo: true
+  # will be ignored (combine fixture and echo unsupported)
+  - method: POST
+    url: /fake-echo-example
+    fixture: fixture.example.json
+    echo: true
+  # will be ignored (combine GET and echo unsupported)
+  - method: GET
+    url: /fake-echo-example
+    echo: true
 ```
+
+### Explain
+
+- echo - puts POST request body to response, copy Content-Length
+- fixture - file of fixture
+- method - GET / POST / etc..
+- url - url 🙂
+
+1. `echo` can be combined with GET
+2. `echo` can be combined with `fixture`
 
 ## Fixture example
 

@@ -1,63 +1,147 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"io"
+	"net/http"
 	"os"
 
-	"github.com/im-kulikov/potter/config"
-	"github.com/im-kulikov/potter/logger"
-	"github.com/im-kulikov/potter/logger/zap"
-	"github.com/im-kulikov/yaml"
-	"github.com/labstack/echo"
+	"github.com/bmizerany/pat"
+	"github.com/chapsuk/mserv"
+	"github.com/im-kulikov/helium"
+	"github.com/im-kulikov/helium/grace"
+	"github.com/im-kulikov/helium/logger"
+	"github.com/im-kulikov/helium/module"
+	"github.com/im-kulikov/helium/settings"
+	"github.com/im-kulikov/helium/web"
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
+)
+
+type (
+	app struct {
+		servers mserv.Server
+		log     *zap.Logger
+	}
+
+	handler struct {
+		Fixture string
+		Method  string
+		URL     string
+		Echo    bool
+	}
+
+	handlers []handler
 )
 
 var (
-	log   logger.Logger
-	bind  = flag.String("bind", ":8081", "server bind address")
-	conf  = flag.String("c", "config.yml", "config for server")
-	debug = flag.Bool("debug", false, "use debug")
-	level = zap.Production
+	conf = flag.String("c", "config.yml", "config for server")
+
+	BuildTime    = "now"
+	BuildVersion = "dev"
+
+	mod = module.Module{
+		{Constructor: newApp},
+		{Constructor: newAPI},
+	}.Append(
+		grace.Module,
+		settings.Module,
+		logger.Module,
+		web.ServersModule,
+	)
 )
 
-func main() {
+const HeaderContentType = "Content-Type"
+
+func echoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// set content-type
+
+		w.Header().Set(HeaderContentType,
+			r.Header.Get(HeaderContentType))
+
+		// set status code:
+		w.WriteHeader(http.StatusOK)
+
+		if _, err := io.Copy(w, r.Body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error()))
+		}
+	}
+}
+
+func fixtureHandler(fixture string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		f, err := os.Open(fixture)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer f.Close()
+
+		fi, _ := f.Stat()
+		http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+	}
+}
+
+func newAPI(log *zap.Logger, v *viper.Viper) (http.Handler, error) {
 	var (
-		err      error
-		file     *os.File
-		settings config.Config
+		items handlers
+		mux   = pat.New()
 	)
 
-	flag.Parse()
-
-	engine := echo.New()
-	engine.HideBanner = true
-
-	if *debug {
-		level = zap.Development
+	if err := v.UnmarshalKey("fixtures", &items); err != nil {
+		return nil, err
 	}
 
-	log = zap.New(level)
-	engine.Logger = log
+	for _, item := range items {
+		l := log.With(
+			zap.String("method", item.Method),
+			zap.String("url", item.URL),
+			zap.String("fixture", item.Fixture),
+			zap.Bool("echo", item.Echo))
 
-	// Open config:
-	if file, err = os.Open(*conf); err != nil {
-		log.Panic(err)
+		l.Debug("try to connect handler")
+
+		switch {
+		case item.URL != "" && item.Echo && item.Method != "GET":
+			mux.Post(item.URL, echoHandler())
+		case item.URL != "" && item.Fixture != "":
+			mux.Add(item.Method, item.URL, fixtureHandler(item.Fixture))
+		default:
+			l.Warn("ignore handler")
+		}
 	}
 
-	// Parse config:
-	if err = yaml.NewDecoder(file).Decode(&settings); err != nil {
-		log.Panic(err)
-	}
+	return mux, nil
+}
 
-	// Apply proxy server
-	if err = settings.Proxy.Apply(); err != nil {
-		log.Panic(err)
+func newApp(log *zap.Logger, serv mserv.Server) helium.App {
+	return &app{
+		servers: serv,
+		log:     log,
 	}
+}
 
-	// Attach endpoints:
-	settings.API.Attach(engine, log)
+func (a *app) Run(ctx context.Context) error {
+	a.log.Info("run servers...")
+	a.servers.Start()
+	a.log.Info("successful run application...")
+	<-ctx.Done()
+	a.log.Info("stop servers...")
+	a.servers.Stop()
+	a.log.Info("successful stop application...")
+	return nil
+}
 
-	// Start web-server:
-	if err = engine.Start(*bind); err != nil {
-		log.Panic(err)
-	}
+func main() {
+	h, err := helium.New(&settings.App{
+		File:         *conf,
+		Name:         "potter",
+		BuildTime:    BuildTime,
+		BuildVersion: BuildVersion,
+	}, mod)
+	helium.Catch(err)
+	helium.Catch(h.Run())
 }

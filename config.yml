@@ -1,0 +1,31 @@
+pprof:
+  address: :6060
+
+metrics:
+  address: :8090
+
+log:
+  level: debug
+  format: console
+
+api:
+  debug: true
+  address: :8080
+  shutdown_timeout: 10s
+
+fixtures:
+  - method: GET
+    url: /fake-json-example
+    fixture: fixture.example.json
+  - method: POST
+    url: /fake-echo-example
+    echo: true
+  # will be ignored (POST, fixture and echo unsupported)
+  - method: POST
+    url: /fake-echo-example
+    fixture: fixture.example.json
+    echo: true
+  # will be ignored (GET and echo unsupported)
+  - method: GET
+    url: /fake-echo-example
+    echo: true
