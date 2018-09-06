@@ -68,8 +68,8 @@ fixtures:
 - method - GET / POST / etc..
 - url - url 🙂
 
-1. `echo` can be combined with GET
-2. `echo` can be combined with `fixture`
+1. `echo` can't be combined with GET
+2. `echo` can't be combined with `fixture`
 
 ## Fixture example
 
